@@ -512,12 +512,12 @@ for mid, deg in deg_states.items():
         name=mid, x=[mid], y=[round(deg * 100, 1)],
         marker_color=color, text=[f"{deg*100:.1f}%"], textposition="outside",
     ))
-fig_deg.update_layout(
+fig_deg.update_layout(**{
     **plotly_layout("Degradation Level (%)", height=260),
-    yaxis=dict(range=[0, 110], title="Degradation %", gridcolor="#21262d"),
-    showlegend=False,
-    barmode="group",
-)
+    "yaxis": dict(range=[0, 110], title="Degradation %", gridcolor="#21262d"),
+    "showlegend": False,
+    "barmode": "group",
+})
 st.plotly_chart(fig_deg, use_container_width=True)
 
 st.divider()
