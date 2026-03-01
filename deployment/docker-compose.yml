@@ -1,0 +1,145 @@
+version: "3.9"
+
+# ============================================================================
+# Smart Factory Digital Twin — Docker Compose
+# ============================================================================
+# Services:
+#   twin-api       → FastAPI REST server  (port 8000)
+#   twin-dashboard → Streamlit dashboard  (port 8501)
+#   influxdb       → Time-series database (port 8086)
+#   grafana        → Metrics dashboard    (port 3000)
+#   mosquitto      → MQTT broker          (port 1883)
+#   redis          → Cache / pub-sub      (port 6379)
+#
+# Usage:
+#   docker-compose up --build          # start all
+#   docker-compose up twin-api         # start API only
+# ============================================================================
+
+networks:
+  factory-net:
+    driver: bridge
+
+volumes:
+  influxdb-data:
+  grafana-data:
+  redis-data:
+
+services:
+
+  # --------------------------------------------------------------------------
+  # Digital Twin REST API
+  # --------------------------------------------------------------------------
+  twin-api:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.api
+    image: smart-factory-twin:api
+    container_name: twin-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - factory-net
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - INFLUX_URL=http://influxdb:8086
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - mosquitto
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # --------------------------------------------------------------------------
+  # Streamlit Dashboard
+  # --------------------------------------------------------------------------
+  twin-dashboard:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.dashboard
+    image: smart-factory-twin:dashboard
+    container_name: twin-dashboard
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    networks:
+      - factory-net
+    environment:
+      - API_URL=http://twin-api:8000
+    depends_on:
+      - twin-api
+
+  # --------------------------------------------------------------------------
+  # InfluxDB — Time-Series Database
+  # --------------------------------------------------------------------------
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    networks:
+      - factory-net
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=factory123
+      - DOCKER_INFLUXDB_INIT_ORG=smart-factory
+      - DOCKER_INFLUXDB_INIT_BUCKET=sensor-data
+      - DOCKER_INFLUXDB_INIT_RETENTION=30d
+
+  # --------------------------------------------------------------------------
+  # Grafana — Metrics & Alerting
+  # --------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    networks:
+      - factory-net
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=factory123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - influxdb
+
+  # --------------------------------------------------------------------------
+  # Eclipse Mosquitto — MQTT Broker
+  # --------------------------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"    # WebSocket
+    networks:
+      - factory-net
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+  # --------------------------------------------------------------------------
+  # Redis — Cache & Pub/Sub
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - factory-net
+    volumes:
+      - redis-data:/data
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
